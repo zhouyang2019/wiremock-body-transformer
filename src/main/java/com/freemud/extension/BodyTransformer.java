@@ -12,7 +12,7 @@
  * limitations under the License.
  */
 
-package com.opentable.extension;
+package com.freemud.extension;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.xml.JacksonXmlModule;
@@ -24,17 +24,15 @@ import com.github.tomakehurst.wiremock.extension.Parameters;
 import com.github.tomakehurst.wiremock.extension.ResponseDefinitionTransformer;
 import com.github.tomakehurst.wiremock.http.Request;
 import com.github.tomakehurst.wiremock.http.ResponseDefinition;
+import org.apache.commons.lang3.RandomStringUtils;
+import org.apache.commons.lang3.RandomUtils;
 import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Random;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -42,9 +40,11 @@ public class BodyTransformer extends ResponseDefinitionTransformer {
 
     private static final String TRANSFORMER_NAME = "body-transformer";
     private static final boolean APPLY_GLOBALLY = false;
-    
+
     private static final Pattern interpolationPattern = Pattern.compile("\\$\\(.*?\\)");
     private static final Pattern randomIntegerPattern = Pattern.compile("!RandomInteger");
+    private static final Pattern prepayIdPattern = Pattern.compile("!prepayId");
+    private static final Pattern transactionIdPattern = Pattern.compile("!transactionId");
 
     private static ObjectMapper jsonMapper = initJsonMapper();
     private static ObjectMapper xmlMapper = initXmlMapper();
@@ -58,26 +58,26 @@ public class BodyTransformer extends ResponseDefinitionTransformer {
         configuration.setXMLTextElementName("value");
         return new XmlMapper(configuration);
     }
-    
+
     @Override
     public String getName() {
         return TRANSFORMER_NAME;
     }
-    
+
     @Override
     public boolean applyGlobally() {
         return APPLY_GLOBALLY;
     }
-    
+
     @Override
     public ResponseDefinition transform(Request request, ResponseDefinition responseDefinition, FileSource fileSource, Parameters parameters) {
         if (hasEmptyResponseBody(responseDefinition)) {
             return responseDefinition;
         }
-        
+
         Map object = null;
         String requestBody = request.getBodyAsString();
-        
+
         // Trying to create map of request body or query string parameters
         try {
             object = jsonMapper.readValue(requestBody, Map.class);
@@ -106,44 +106,44 @@ public class BodyTransformer extends ResponseDefinitionTransformer {
                 }
             }
         }
-        
+
         // Update the map with query parameters if any (if same names - replace)
         if (parameters != null) {
             String urlRegex = parameters.getString("urlRegex");
-            
+
             if (urlRegex != null) {
                 Pattern p = Pattern.compile(urlRegex);
                 Matcher m = p.matcher(request.getUrl());
-                
+
                 // There may be more groups in the regex than the number of named capturing groups
                 List<String> groups = getNamedGroupCandidates(urlRegex);
-                
+
                 if (m.matches() &&
-                    groups.size() > 0 &&
-                    groups.size() <= m.groupCount()) {
-                    
+                        groups.size() > 0 &&
+                        groups.size() <= m.groupCount()) {
+
                     for (int i = 0; i < groups.size(); i++) {
-                        
+
                         if (object == null) {
                             object = new HashMap();
                         }
-                        
+
                         object.put(groups.get(i), m.group(i + 1));
                     }
                 }
             }
         }
-        
+
         String responseBody = getResponseBody(responseDefinition, fileSource);
-        
+
         // Create response by matching request map and response body parametrized values
         return ResponseDefinitionBuilder
-            .like(responseDefinition).but()
-            .withBodyFile(null)
-            .withBody(transformResponse(object, responseBody))
-            .build();
+                .like(responseDefinition).but()
+                .withBodyFile(null)
+                .withBody(transformResponse(object, responseBody))
+                .build();
     }
-    
+
     private String transformResponse(Map requestObject, String response) {
         String modifiedResponse = response;
 
@@ -158,6 +158,15 @@ public class BodyTransformer extends ResponseDefinitionTransformer {
     }
 
     private CharSequence getValue(String group, Map requestObject) {
+        if (prepayIdPattern.matcher(group).find()) {
+            return "wx" + RandomStringUtils.random(34, "abcdefg0123456789");
+        }
+        if (transactionIdPattern.matcher(group).find()) {
+            return String.valueOf(RandomUtils.nextInt(1000000, 9999999))
+                    + String.valueOf(RandomUtils.nextInt(1000000, 9999999))
+                    + String.valueOf(RandomUtils.nextInt(1000000, 9999999))
+                    + String.valueOf(RandomUtils.nextInt(1000000, 9999999));
+        }
         if (randomIntegerPattern.matcher(group).find()) {
             return String.valueOf(new Random().nextInt(2147483647));
         }
@@ -215,5 +224,5 @@ public class BodyTransformer extends ResponseDefinitionTransformer {
 
         return decodedValue;
     }
-    
+
 }
